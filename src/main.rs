@@ -2,11 +2,14 @@ extern crate ggez;
 extern crate rand;
 
 use ggez::event::EventHandler;
-use ggez::{GameResult, Context, event, graphics};
+use ggez::{GameResult, Context, event, graphics, timer};
 use ggez::conf::Conf;
 use ggez::graphics::{circle, DrawMode, present, Point2, Color, set_color};
 
 use rand::random;
+use std::fs::File;
+
+const TARGET_FPS: u32 = 60;
 
 struct GameState {
     walkers: Vec<RandomWalker>,
@@ -22,9 +25,9 @@ impl GameState {
         //     walkers.push(RandomWalker::new(width, height)?);
         // }
 
-        walkers.push(RandomWalker::new(width, height, "red")?);
-        walkers.push(RandomWalker::new(width, height, "blue")?);
-        walkers.push(RandomWalker::new(width, height, "green")?);
+        walkers.push(RandomWalker::new(width, height)?);
+        // walkers.push(RandomWalker::new(width, height)?);
+        // walkers.push(RandomWalker::new(width, height)?);
 
         Ok(GameState {
             walkers,
@@ -35,18 +38,26 @@ impl GameState {
 }
 
 impl EventHandler for GameState {
-    fn update(&mut self, _context: &mut Context) -> GameResult<()> {
-        for walker in &mut self.walkers {
-            walker.step()?;
-            walker.keep_in_arena(self.width, self.height)?;
+    fn update(&mut self, context: &mut Context) -> GameResult<()> {
+        while timer::check_update_time(context, TARGET_FPS) {
+            let dt = 1.0 / TARGET_FPS as f32;
+
+            for walker in &mut self.walkers {
+                walker.update(self.width, self.height);
+                walker.keep_in_arena(self.width, self.height)?;
+                walker.bullet.update(context, dt, self.width, self.height)?;
+            }
         }
 
         Ok(())
     }
 
     fn draw(&mut self, context: &mut Context) -> GameResult<()> {
+        graphics::clear(context);
+
         for walker in &mut self.walkers {
             walker.draw(context)?;
+            walker.bullet.draw(context)?;
         }
 
         present(context);
@@ -57,46 +68,40 @@ impl EventHandler for GameState {
 struct RandomWalker {
     location: Point2,
     radius: f32,
-    color: Color
+    color: Color,
+    bullet: Bullet
 }
 
 impl RandomWalker {
-    fn new(width: f32, height: f32, color_string: &str) -> GameResult<RandomWalker> {
-        let x = random::<f32>() * width;
-        let y = random::<f32>() * height;
-        let color = match color_string {
-            "red" => Color::new(1.0, 0.0, 0.0, 1.0),
-            "green" => Color::new(0.0, 1.0, 0.0, 1.0),
-            "blue" => Color::new(0.0, 0.0, 1.0, 1.0),
-            &_ => panic!("pass in valid color only") // todo pass proper error back
-        };
+    fn new(width: f32, height: f32) -> GameResult<RandomWalker> {
+        let x = width / 2.0;
+        let y = height / 2.0;
+        let color = Color::new( random::<f32>(), 
+                                random::<f32>(), 
+                                random::<f32>(), 
+                                1.0);
+        let bullet = Bullet::new();
 
         Ok(RandomWalker {
             location: Point2::new(x, y),
-            radius: 1.0,
-            color
+            radius: 15.0,
+            color,
+            bullet
         })
     }
 
-    fn step(&mut self) -> GameResult<()> {
-        let random_number = random::<f32>();
-        
-        if random_number > 0.75 {
-            self.location.y -= 1.0;
-        } else if random_number > 0.5 {
-            self.location.x += 1.0;
-        } else if random_number > 0.25 {
-            self.location.y += 1.0;
-        } else {
-            self.location.x -= 1.0;
+    fn update(&mut self, game_width: f32, game_height: f32) {
+        if !self.bullet.is_fired {
+            let bullet_location = self.location.clone();
+            let target = Point2::new(   random::<f32>() * game_width,
+                                        random::<f32>() * game_height);
+            self.bullet.fire(bullet_location, target);
         }
-
-        Ok(())
     }
 
     fn draw(&mut self, context: &mut Context) -> GameResult<()> {
         set_color(context, self.color)?;
-        circle(context, DrawMode::Fill, self.location, self.radius, 1.0)
+        circle(context, DrawMode::Line(1.0), self.location, self.radius, 1.0)
     }
 
     fn keep_in_arena(&mut self, arena_width: f32, arena_height: f32) -> GameResult<()> {
@@ -116,8 +121,68 @@ impl RandomWalker {
     }
 }
 
+struct Bullet {
+    location: Point2,
+    velocity: Point2,
+    size: f32,
+    is_fired: bool,
+    color: Color
+}
+
+impl Bullet {
+    fn new() -> Bullet {
+        let size = 5.0;
+        let velocity = Point2::new(500.0, 0.0);
+        let is_fired = false;
+        let color = Color::new(1.0, 1.0, 1.0, 1.0);
+        let location = Point2::new(-5.0, -5.0);
+
+        Bullet {
+            location,
+            velocity,
+            size,
+            is_fired,
+            color
+        }
+    }
+
+    fn draw(&mut self, context: &mut Context) -> GameResult<()> {
+        set_color(context, self.color)?;
+        circle(context, DrawMode::Fill, self.location, self.size, 1.0)?;
+
+        Ok(())
+    }
+
+    fn update(&mut self, _context: &mut Context, dt: f32, width: f32, height: f32) -> GameResult<()> {
+        if self.is_fired {
+            self.location.x += self.velocity.x * dt;
+            self.location.y += self.velocity.y * dt;
+
+            if self.is_off_screen(width, height) {
+                self.is_fired = false;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_off_screen(&self, width: f32, height: f32) -> bool {
+        self.location.y < 0.0 || self.location.x > width || self.location.y > height || self.location.x < 0.0
+    }
+
+    fn fire(&mut self, location: Point2, target: Point2) {
+        let direction = Point2::new(target.x - location.x, target.y - location.y);
+
+        self.velocity = direction;
+        self.location = location;
+        self.is_fired = true;
+    }
+}
+
 fn main() {
-    let configuration = Conf::new();
+    let mut configuration_read = File::open("conf.toml").unwrap();
+
+    let configuration = Conf::from_toml_file(&mut configuration_read).unwrap();
     let context = &mut Context::load_from_conf("random_walkers", "Brookzerker", configuration).unwrap();
     let (width, height) = graphics::get_size(context);
     let game_state = &mut GameState::new(width as f32, height as f32).unwrap();
