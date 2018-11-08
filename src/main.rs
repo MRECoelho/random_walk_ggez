@@ -171,11 +171,37 @@ impl Bullet {
     }
 
     fn fire(&mut self, location: Point2, target: Point2) {
-        let direction = Point2::new(target.x - location.x, target.y - location.y);
+        let mut direction = Point2::new(target.x - location.x, target.y - location.y);
+
+        if let Some(point) = self.normalize(direction) {
+            direction = point;
+        }
+
+        direction.x *= 500f32;
+        direction.y *= 500f32;
 
         self.velocity = direction;
         self.location = location;
         self.is_fired = true;
+    }
+
+    fn get_magnitude(&self, vector: Point2) -> f32 {
+        let magnitude_squared = (vector.x * vector.x) + (vector.y * vector.y);
+
+        magnitude_squared.sqrt()
+    }
+
+    fn normalize(&self, vector: Point2) -> Option<Point2> {
+        let magnitude = self.get_magnitude(vector);
+
+        if magnitude > 0.0 {
+            Some(Point2::new(
+                vector.x / magnitude,
+                vector.y / magnitude
+            ))
+        } else {
+            None
+        }
     }
 }
 
