@@ -43,7 +43,7 @@ impl EventHandler for GameState {
             let dt = 1.0 / TARGET_FPS as f32;
 
             for walker in &mut self.walkers {
-                walker.update(self.width, self.height);
+                walker.update(self.width, self.height, dt);
                 walker.keep_in_arena(self.width, self.height)?;
                 walker.bullet.update(context, dt, self.width, self.height)?;
             }
@@ -69,7 +69,10 @@ struct RandomWalker {
     location: Point2,
     radius: f32,
     color: Color,
-    bullet: Bullet
+    bullet: Bullet,
+    destination: Point2,
+    velocity: Point2,
+    speed: f32
 }
 
 impl RandomWalker {
@@ -81,22 +84,37 @@ impl RandomWalker {
                                 random::<f32>(), 
                                 1.0);
         let bullet = Bullet::new();
+        let destination = Point2::new(x, y);
+        let velocity = Point2::new(0f32, 0f32);
+        let speed = 100f32;
 
         Ok(RandomWalker {
             location: Point2::new(x, y),
             radius: 15.0,
             color,
-            bullet
+            bullet,
+            destination,
+            velocity,
+            speed
         })
     }
 
-    fn update(&mut self, game_width: f32, game_height: f32) {
+    fn update(&mut self, game_width: f32, game_height: f32, dt: f32) {
         if !self.bullet.is_fired {
             let bullet_location = self.location.clone();
             let target = Point2::new(   random::<f32>() * game_width,
                                         random::<f32>() * game_height);
             self.bullet.fire(bullet_location, target);
         }
+
+        if self.is_at_destination() {
+            let x = random::<f32>() * game_width;
+            let y = random::<f32>() * game_height;
+
+            self.destination = Point2::new(x, y);
+        }
+
+        self.step(dt);
     }
 
     fn draw(&mut self, context: &mut Context) -> GameResult<()> {
@@ -118,6 +136,36 @@ impl RandomWalker {
         }
 
         Ok(())
+    }
+
+    fn is_at_destination(&self) -> bool {
+        let difference = Point2::new(
+            self.location.x - self.destination.x,
+            self.location.y - self.destination.y
+        );
+        let distance = get_magnitude(difference);
+
+        distance < 3f32
+    }
+
+    fn step(&mut self, dt: f32) {
+        let direction = Point2::new(
+            self.destination.x - self.location.x,
+            self.destination.y - self.location.y
+        );
+        let mut normalized_direction = Point2::new(0f32, 0f32);
+
+        if let Some(result) = normalize(direction) {
+            normalized_direction = result;
+        }
+        
+        let velocity = Point2::new(
+            normalized_direction.x * self.speed,
+            normalized_direction.y * self.speed
+        );
+
+        self.location.x += velocity.x * dt;
+        self.location.y += velocity.y * dt;
     }
 }
 
@@ -173,7 +221,7 @@ impl Bullet {
     fn fire(&mut self, location: Point2, target: Point2) {
         let mut direction = Point2::new(target.x - location.x, target.y - location.y);
 
-        if let Some(point) = self.normalize(direction) {
+        if let Some(point) = normalize(direction) {
             direction = point;
         }
 
@@ -184,24 +232,24 @@ impl Bullet {
         self.location = location;
         self.is_fired = true;
     }
+}
 
-    fn get_magnitude(&self, vector: Point2) -> f32 {
-        let magnitude_squared = (vector.x * vector.x) + (vector.y * vector.y);
+fn get_magnitude(vector: Point2) -> f32 {
+    let magnitude_squared = (vector.x * vector.x) + (vector.y * vector.y);
 
-        magnitude_squared.sqrt()
-    }
+    magnitude_squared.sqrt()
+}
 
-    fn normalize(&self, vector: Point2) -> Option<Point2> {
-        let magnitude = self.get_magnitude(vector);
+fn normalize(vector: Point2) -> Option<Point2> {
+    let magnitude = get_magnitude(vector);
 
-        if magnitude > 0.0 {
-            Some(Point2::new(
-                vector.x / magnitude,
-                vector.y / magnitude
-            ))
-        } else {
-            None
-        }
+    if magnitude > 0.0 {
+        Some(Point2::new(
+            vector.x / magnitude,
+            vector.y / magnitude
+        ))
+    } else {
+        None
     }
 }
 
